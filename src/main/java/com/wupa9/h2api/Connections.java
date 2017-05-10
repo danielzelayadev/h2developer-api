@@ -21,8 +21,12 @@ import javax.ws.rs.core.Response;
 
 import com.wupa9.h2api.models.ConnectData;
 import com.wupa9.h2api.models.Connection;
+import com.wupa9.h2api.models.SchemaTreeNode;
+import com.wupa9.h2api.models.UserTreeNode;
 
 import h2.core.H2Connection;
+import h2.core.datastructs.Row;
+import h2.core.datastructs.Table;
 
 /**
  * Connections resource
@@ -131,7 +135,7 @@ public class Connections {
 			SESSION = new H2Connection(data.getUrl(), data.getUsername(), data.getPassword());
 			storeSession();
 			
-			return Response.status(200).entity(data).build();
+			return Response.status(200).entity(getDBTree()).build();
 		} catch (SQLException e) {
 			return Response.status(500)
 					.entity(new Error("Could not connect.", e.getMessage())).build();
@@ -158,6 +162,94 @@ public class Connections {
 		} catch (IOException e) {
 			return Response.status(500).entity(new Error("Failed to store session.", e.getMessage())).build();
 		}
+	}
+	
+	public ArrayList<UserTreeNode> getDBTree() throws SQLException {
+		if (SESSION == null)
+			return null;
+		
+		ArrayList<UserTreeNode> dbTree = new ArrayList<>();
+		
+		Table users = SESSION.query("select name from information_schema.users");
+		
+		for (Row row : users) {
+			UserTreeNode utn = new UserTreeNode();
+			
+			utn.user = row.get(0);
+			
+			Table schemas = SESSION
+					.query("select schema_name from	information_schema.schemata " +
+						   "where schema_owner='" + utn.user + "'");
+			
+			for (Row _row : schemas) {
+				SchemaTreeNode stn = new SchemaTreeNode();
+				
+				stn.schema = _row.get(0);
+				
+				Table constants = SESSION
+						.query("select constant_name from information_schema.constants " +
+							   "where constant_schema='" + stn.schema + "'");
+				
+				for (Row cRow : constants)
+					stn.constants.add(cRow.get(0));
+				
+				Table constraints = SESSION
+						.query("select constraint_name from information_schema.constraints " +
+							   "where constraint_schema='" + stn.schema + "'");
+				
+				for (Row cRow : constraints)
+					stn.constraints.add(cRow.get(0));
+				
+				Table functions = SESSION
+						.query("select alias_name from information_schema.function_aliases " +
+							   "where alias_schema='" + stn.schema + "'");
+				
+				for (Row cRow : functions)
+					stn.functions.add(cRow.get(0));
+				
+				Table indexes = SESSION
+						.query("select index_name from information_schema.indexes " +
+							   "where table_schema='" + stn.schema + "'");
+				
+				for (Row cRow : indexes)
+					stn.indexes.add(cRow.get(0));
+				
+				Table sequences = SESSION
+						.query("select sequence_name from information_schema.sequences " +
+							   "where sequence_schema='" + stn.schema + "'");
+				
+				for (Row cRow : sequences)
+					stn.sequences.add(cRow.get(0));
+				
+				Table tables = SESSION
+						.query("select table_name from information_schema.tables " +
+							   "where table_schema='" + stn.schema + "'");
+				
+				for (Row cRow : tables)
+					stn.tables.add(cRow.get(0));
+				
+				Table triggers = SESSION
+						.query("select trigger_name from information_schema.triggers " +
+							   "where trigger_schema='" + stn.schema + "'");
+				
+				for (Row cRow : triggers)
+					stn.triggers.add(cRow.get(0));
+				
+				Table views = SESSION
+						.query("select table_name from information_schema.views " +
+							   "where table_schema='" + stn.schema + "'");
+				
+				for (Row cRow : views)
+					stn.views.add(cRow.get(0));
+				
+				
+				utn.schemas.add(stn);
+			}
+					
+			dbTree.add(utn);
+		}
+		
+		return dbTree;
 	}
 	
 	private void closeSession() throws SQLException {
