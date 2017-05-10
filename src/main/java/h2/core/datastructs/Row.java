@@ -19,6 +19,10 @@ public class Row {
 		cells.add(indx, c);
 	}
 	
+	public String get(int cellNo) {
+		return getCell(cellNo).getValue();
+	}
+	
 	public void addCell(Cell c) {
 		cells.add(c);
 	}
