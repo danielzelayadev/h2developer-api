@@ -1,8 +1,9 @@
 package h2.core.datastructs;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 
-public class Table {
+public class Table implements Iterable<Row> {
 
 	private ArrayList<Column> columns;
 	private ArrayList<Row> rows;
@@ -76,6 +77,13 @@ public class Table {
 	public int getRowCount() {
 		return rows.size();
 	}
+	
+	public String get(String colName, int rowNo) {
+		return rows
+				.get(rowNo)
+				.getCell(columns.indexOf(colName))
+				.getValue();
+	}
 
 	@Override
 	public String toString() {
@@ -92,6 +100,25 @@ public class Table {
 		}
 		
 		return str.toString();
+	}
+
+	@Override
+	public Iterator<Row> iterator() {
+		return new Iterator<Row>() {
+			
+			private int indx = 0;
+
+			@Override
+			public boolean hasNext() {
+				return indx < rows.size();
+			}
+
+			@Override
+			public Row next() {
+				return rows.get(indx++);
+			}
+			
+		};
 	}
 	
 }
