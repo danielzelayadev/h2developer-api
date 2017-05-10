@@ -21,4 +21,14 @@ public class Column {
 		return name;
 	}
 	
+	@Override
+	public boolean equals(Object obj) {
+		if (obj instanceof Column)
+			return name.equals(((Column)obj).name);
+		if (obj instanceof String)
+			return name.equals((String)obj);
+		
+		return super.equals(obj);
+	}
+	
 }
