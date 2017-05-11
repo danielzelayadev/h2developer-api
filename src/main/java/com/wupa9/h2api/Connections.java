@@ -21,8 +21,11 @@ import javax.ws.rs.core.Response;
 
 import com.wupa9.h2api.models.ConnectData;
 import com.wupa9.h2api.models.Connection;
+import com.wupa9.h2api.models.Entry;
+import com.wupa9.h2api.models.Result;
 import com.wupa9.h2api.models.SchemaTreeNode;
 import com.wupa9.h2api.models.SessionData;
+import com.wupa9.h2api.models.ResultStatus;
 import com.wupa9.h2api.models.UserTreeNode;
 
 import h2.core.H2Connection;
@@ -183,6 +186,61 @@ public class Connections {
 		}
 		
 		return Response.status(200).entity(sd).build();
+	}
+	
+	@POST
+	@Path("run")
+	@Consumes(MediaType.APPLICATION_JSON)
+	@Produces(MediaType.APPLICATION_JSON)
+	public Response run(ArrayList<String> statements) {
+		if (SESSION == null)
+			return Response.status(403)
+					.entity(new Error("You must connect to a db first.", ""))
+					.build();
+		
+		ArrayList<Result> results = new ArrayList<>();
+		
+		for (String stmt : statements) {
+			Result rs = new Result();
+			String firstToken = stmt.substring(0, stmt.indexOf(" "));
+			
+			rs.statement = stmt;
+			
+			if (firstToken.equalsIgnoreCase("SELECT")) {
+				try {
+					Table t = SESSION.query(stmt);
+					
+					for (Row r : t) {
+						int i = 0;
+						ArrayList<Entry> e = new ArrayList<>();
+						
+						for (String val : r)
+								e.add(new Entry(t.getColumn(i++).getName(), val));
+						
+						rs.push(e);
+					}
+					
+					rs.status = ResultStatus.SUCCESS;
+				} catch (SQLException e) {
+					rs.status = ResultStatus.FAILED;
+					rs.msg = e.getMessage();
+				}
+				results.add(rs);
+				continue;
+			}
+			
+			try {
+				SESSION.execute(stmt);
+				rs.status = ResultStatus.SUCCESS_AND_UPDATE;
+			} catch (SQLException e) {
+				rs.status = ResultStatus.FAILED;
+				rs.msg = e.getMessage();
+			}
+			
+			results.add(rs);
+		}
+		
+		return Response.status(200).entity(results).build();
 	}
 	
 	private ArrayList<UserTreeNode> getDBTree() throws SQLException {
