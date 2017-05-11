@@ -1,8 +1,9 @@
 package h2.core.datastructs;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 
-public class Row {
+public class Row implements Iterable<String> {
 
 	private ArrayList<Cell> cells;
 	
@@ -50,6 +51,24 @@ public class Row {
 		}
 		
 		return str.toString();
+	}
+
+	@Override
+	public Iterator<String> iterator() {
+		return new Iterator<String>() {
+			
+			private int indx = 0;
+			
+			@Override
+			public String next() {
+				return cells.get(indx++).getValue();
+			}
+			
+			@Override
+			public boolean hasNext() {
+				return indx < cells.size();
+			}
+		};
 	}
 	
 }
