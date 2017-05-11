@@ -22,6 +22,7 @@ import javax.ws.rs.core.Response;
 import com.wupa9.h2api.models.ConnectData;
 import com.wupa9.h2api.models.Connection;
 import com.wupa9.h2api.models.SchemaTreeNode;
+import com.wupa9.h2api.models.SessionData;
 import com.wupa9.h2api.models.UserTreeNode;
 
 import h2.core.H2Connection;
@@ -147,7 +148,6 @@ public class Connections {
 	
 	@POST
 	@Path("disconnect")
-	@Consumes(MediaType.APPLICATION_JSON)
 	@Produces(MediaType.APPLICATION_JSON)
 	public Response disconnect() {
 		if (SESSION == null)
@@ -164,7 +164,28 @@ public class Connections {
 		}
 	}
 	
-	public ArrayList<UserTreeNode> getDBTree() throws SQLException {
+	@GET
+	@Path("session")
+	@Produces(MediaType.APPLICATION_JSON)
+	public Response getSession() {
+		SessionData sd = new SessionData();
+		
+		if (SESSION != null) {
+			sd.conn = new ConnectData(SESSION.getConn().getUrl(), 
+					SESSION.getConn().getUsername(), SESSION.getConn().getPassword());
+			try {
+				sd.dbTree = getDBTree();
+			} catch (SQLException e) {
+				return Response.status(500)
+						.entity(new Error("Failed to fetch DB Tree.", e.getMessage()))
+						.build();
+			}
+		}
+		
+		return Response.status(200).entity(sd).build();
+	}
+	
+	private ArrayList<UserTreeNode> getDBTree() throws SQLException {
 		if (SESSION == null)
 			return null;
 		
