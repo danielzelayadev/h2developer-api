@@ -9,6 +9,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
@@ -21,14 +22,14 @@ import javax.ws.rs.core.Response;
 
 import com.wupa9.h2api.models.ConnectData;
 import com.wupa9.h2api.models.Connection;
-import com.wupa9.h2api.models.Entry;
 import com.wupa9.h2api.models.Result;
+import com.wupa9.h2api.models.ResultStatus;
 import com.wupa9.h2api.models.SchemaTreeNode;
 import com.wupa9.h2api.models.SessionData;
-import com.wupa9.h2api.models.ResultStatus;
 import com.wupa9.h2api.models.UserTreeNode;
 
 import h2.core.H2Connection;
+import h2.core.datastructs.Column;
 import h2.core.datastructs.Row;
 import h2.core.datastructs.Table;
 
@@ -97,11 +98,8 @@ public class Connections {
 		
 		if (SESSION != null && conn.getUrl().equals(SESSION.getConn().getUrl())) {
 			try {
-				SESSION.disconnect();
+				closeSession();
 				storeSession();
-			} catch (SQLException e) {
-				return Response.status(500)
-						.entity(new Error("Could not disconnect.", e.getMessage())).build();
 			} catch (IOException e) {
 				return Response.status(500)
 						.entity(new Error("Failed to store session change.", e.getMessage())).build();
@@ -127,16 +125,9 @@ public class Connections {
 		if (!CONNS.contains(data))
 			return Response.status(400).entity(new Error("Unknown connection url.", "")).build();
 		
-		if (SESSION != null)
-			try {
-				SESSION.disconnect();
-			} catch (SQLException e) {
-				return Response.status(500)
-						.entity(new Error("Could not disconnect current session.", e.getMessage())).build();
-			}
-		
 		try {
 			SESSION = new H2Connection(data.getUrl(), data.getUsername(), data.getPassword());
+			SESSION.disconnect();
 			storeSession();
 			
 			return Response.status(200).entity(getDBTree()).build();
@@ -160,8 +151,6 @@ public class Connections {
 			closeSession();
 			storeSession();
 			return Response.status(200).build();
-		} catch (SQLException e) {
-			return Response.status(500).entity(new Error("Failed to disconnect.", e.getMessage())).build();
 		} catch (IOException e) {
 			return Response.status(500).entity(new Error("Failed to store session.", e.getMessage())).build();
 		}
@@ -190,62 +179,75 @@ public class Connections {
 	
 	@POST
 	@Path("run")
-	@Consumes(MediaType.APPLICATION_JSON)
+	@Consumes(MediaType.TEXT_PLAIN)
 	@Produces(MediaType.APPLICATION_JSON)
-	public Response run(ArrayList<String> statements) {
+	public Response run(String statement) {
 		if (SESSION == null)
 			return Response.status(403)
 					.entity(new Error("You must connect to a db first.", ""))
 					.build();
 		
-		ArrayList<Result> results = new ArrayList<>();
-		
-		for (String stmt : statements) {
-			Result rs = new Result();
-			String firstToken = stmt.substring(0, stmt.indexOf(" "));
-			
-			rs.statement = stmt;
-			
-			if (firstToken.equalsIgnoreCase("SELECT")) {
-				try {
-					Table t = SESSION.query(stmt);
-					
-					for (Row r : t) {
-						int i = 0;
-						ArrayList<Entry> e = new ArrayList<>();
-						
-						for (String val : r)
-								e.add(new Entry(t.getColumn(i++).getName(), val));
-						
-						rs.push(e);
-					}
-					
-					rs.status = ResultStatus.SUCCESS;
-				} catch (SQLException e) {
-					rs.status = ResultStatus.FAILED;
-					rs.msg = e.getMessage();
-				}
-				results.add(rs);
-				continue;
-			}
-			
-			try {
-				SESSION.execute(stmt);
-				rs.status = ResultStatus.SUCCESS_AND_UPDATE;
-			} catch (SQLException e) {
-				rs.status = ResultStatus.FAILED;
-				rs.msg = e.getMessage();
-			}
-			
-			results.add(rs);
+		try {
+			SESSION.connect();
+		} catch (SQLException e1) {
+			return Response.status(500).entity(new Error("Connection failed.",e1.getMessage())).build();
 		}
 		
-		return Response.status(200).entity(results).build();
+		Result res = new Result();
+		
+		String firstToken = statement.substring(0, statement.indexOf(" "));
+		
+		res.statement = statement;
+		
+		if (firstToken.equalsIgnoreCase("SELECT")) {
+			try {
+				Table t = SESSION.query(statement);
+				ArrayList<Column> cols = t.getColumns();
+				
+				for (Column c : cols)
+					res.pushColumn(c.getName());
+				
+				for (Row r : t) {
+					int i = 0;
+					HashMap<String, String> rowData = new HashMap<>();
+					
+					for (String val : r)
+						rowData.put(t.getColumn(i++).getName(), val);
+					
+					res.push(rowData);
+				}
+				
+				res.status = ResultStatus.SUCCESS;
+			} catch (SQLException e) {
+				res.status = ResultStatus.FAILED;
+				res.msg = e.getMessage();
+				res.errorCode = e.getErrorCode();
+			}
+		} else {
+			try {
+				SESSION.execute(statement);
+				res.status = ResultStatus.SUCCESS_AND_UPDATE;
+			} catch (SQLException e) {
+				res.status = ResultStatus.FAILED;
+				res.msg = e.getMessage();
+				res.errorCode = e.getErrorCode();
+			}
+		}
+		
+		try {
+			SESSION.disconnect();
+		} catch (SQLException e) {
+			return Response.status(500).entity(new Error("Failed to disconnect.", e.getMessage())).build();
+		}
+		
+		return Response.status(200).entity(res).build();
 	}
 	
 	private ArrayList<UserTreeNode> getDBTree() throws SQLException {
 		if (SESSION == null)
 			return null;
+		
+		SESSION.connect();
 		
 		ArrayList<UserTreeNode> dbTree = new ArrayList<>();
 		
@@ -328,13 +330,12 @@ public class Connections {
 			dbTree.add(utn);
 		}
 		
+		SESSION.disconnect();
+		
 		return dbTree;
 	}
 	
-	private void closeSession() throws SQLException {
-		if (SESSION == null) return;
-		
-		SESSION.disconnect();
+	private void closeSession() {
 		SESSION = null;
 	}
 	
@@ -350,6 +351,9 @@ public class Connections {
 		
 		h2.core.datastructs.Connection c = (h2.core.datastructs.Connection) is.readObject();
 		SESSION = c == null ? null : new H2Connection(c);
+		
+		if (SESSION != null)
+			SESSION.disconnect();
 		
 		is.close();
 	}
