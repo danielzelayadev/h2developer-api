@@ -7,6 +7,7 @@ public class Result {
 	public String statement = "";
 	public ResultSet resultSet = new ResultSet();
 	public ResultStatus status = ResultStatus.SUCCESS;
+	public int updateCount = -1;
 	public String msg = "";
 	public int errorCode = -1;
 	
