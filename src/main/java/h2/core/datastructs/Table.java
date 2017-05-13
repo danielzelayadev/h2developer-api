@@ -1,5 +1,8 @@
 package h2.core.datastructs;
 
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Iterator;
 
@@ -11,6 +14,23 @@ public class Table implements Iterable<Row> {
 	public Table() {
 		columns = new ArrayList<>();
 		rows = new ArrayList<>();
+	}
+	
+	public Table(ResultSet rs) throws SQLException {
+		columns = new ArrayList<>();
+		rows = new ArrayList<>();
+		
+		ResultSetMetaData rsmd = rs.getMetaData();
+				
+		for (int i = 0; i < rsmd.getColumnCount(); i++)
+			addColumn(new Column(rsmd.getColumnName(i + 1)));
+			
+        while (rs.next()) {
+        	Row r = new Row();
+        	for (int i = 0; i < rsmd.getColumnCount(); i++)
+        		r.addCell(new Cell(rs.getString(i + 1)));
+        	insertRow(r);
+        }
 	}
 	
 	public void addColumn(Column c) {
