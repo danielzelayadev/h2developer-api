@@ -22,6 +22,8 @@ import javax.ws.rs.core.Response;
 
 import com.wupa9.h2api.models.ConnectData;
 import com.wupa9.h2api.models.Connection;
+import com.wupa9.h2api.models.DBObject;
+import com.wupa9.h2api.models.DBTreeRoot;
 import com.wupa9.h2api.models.Result;
 import com.wupa9.h2api.models.ResultStatus;
 import com.wupa9.h2api.models.SchemaTreeNode;
@@ -237,96 +239,202 @@ public class Connections {
 		return Response.status(200).entity(res).build();
 	}
 	
-	private ArrayList<UserTreeNode> getDBTree() throws SQLException {
+	private DBTreeRoot getDBTree() throws SQLException {
 		if (SESSION == null)
 			return null;
 		
 		SESSION.connect();
 		
-		ArrayList<UserTreeNode> dbTree = new ArrayList<>();
+		DBTreeRoot dbTree = new DBTreeRoot();
 		
-		Table users = SESSION.query("select name from information_schema.users");
+		dbTree.templates.put("createSchema", "CREATE SCHEMA IF NOT EXISTS <NAME> AUTHORIZATION <USER_NAME>");
+		dbTree.templates.put("createUser", "CREATE USER <NAME> PASSWORD '<PASSWORD>' [ADMIN]");
+		dbTree.templates.put("setPassword", "ALTER USER <NAME> SET PASSWORD '<NEW_PASS>'");
+		dbTree.templates.put("setAdmin", "ALTER USER <NAME> ADMIN [TRUE|FALSE]");
 		
-		for (Row row : users) {
-			UserTreeNode utn = new UserTreeNode();
+		Table allUsers = SESSION.query("select name, admin from information_schema.users");
+		
+		for (Row row : allUsers) {
+			UserTreeNode utn = getUserNodeFromRow(row);
 			
-			utn.user = row.get(0);
-			
-			Table schemas = SESSION
-					.query("select schema_name from	information_schema.schemata " +
-						   "where schema_owner='" + utn.user + "'");
-			
-			for (Row _row : schemas) {
-				SchemaTreeNode stn = new SchemaTreeNode();
-				
-				stn.schema = _row.get(0);
-				
-				Table constants = SESSION
-						.query("select constant_name from information_schema.constants " +
-							   "where constant_schema='" + stn.schema + "'");
-				
-				for (Row cRow : constants)
-					stn.constants.add(cRow.get(0));
-				
-				Table constraints = SESSION
-						.query("select constraint_name from information_schema.constraints " +
-							   "where constraint_schema='" + stn.schema + "'");
-				
-				for (Row cRow : constraints)
-					stn.constraints.add(cRow.get(0));
-				
-				Table functions = SESSION
-						.query("select alias_name from information_schema.function_aliases " +
-							   "where alias_schema='" + stn.schema + "'");
-				
-				for (Row cRow : functions)
-					stn.functions.add(cRow.get(0));
-				
-				Table indexes = SESSION
-						.query("select index_name from information_schema.indexes " +
-							   "where table_schema='" + stn.schema + "'");
-				
-				for (Row cRow : indexes)
-					stn.indexes.add(cRow.get(0));
-				
-				Table sequences = SESSION
-						.query("select sequence_name from information_schema.sequences " +
-							   "where sequence_schema='" + stn.schema + "'");
-				
-				for (Row cRow : sequences)
-					stn.sequences.add(cRow.get(0));
-				
-				Table tables = SESSION
-						.query("select table_name from information_schema.tables " +
-							   "where table_schema='" + stn.schema + "'");
-				
-				for (Row cRow : tables)
-					stn.tables.add(cRow.get(0));
-				
-				Table triggers = SESSION
-						.query("select trigger_name from information_schema.triggers " +
-							   "where trigger_schema='" + stn.schema + "'");
-				
-				for (Row cRow : triggers)
-					stn.triggers.add(cRow.get(0));
-				
-				Table views = SESSION
-						.query("select table_name from information_schema.views " +
-							   "where table_schema='" + stn.schema + "'");
-				
-				for (Row cRow : views)
-					stn.views.add(cRow.get(0));
-				
-				
-				utn.schemas.add(stn);
+			if (utn.user.equalsIgnoreCase(SESSION.getConn().getUsername())) {
+				dbTree.userSchemas = utn.schemas;
+				continue;
 			}
-					
-			dbTree.add(utn);
+			
+			dbTree.otherUsers.add(utn);
 		}
 		
 		SESSION.disconnect();
 		
 		return dbTree;
+	}
+	
+	private UserTreeNode getUserNodeFromRow(Row row) throws SQLException {
+		UserTreeNode utn = new UserTreeNode();
+		
+		utn.user = row.get(0);
+		utn.ddl = "CREATE USER IF NOT EXISTS " + utn.user + 
+				" SALT '059f80ec7337ca19' HASH 'd92312214feaddf304154ec8b944a63116a542699ee4d2fb5a3b4e0b200cffea'";
+		if (row.get(1).equals("true")) utn.ddl += " " + row.get(1);
+		utn.query = "SELECT * FROM INFORMATION_SCHEMA.USERS WHERE NAME='" + utn.user + "'";
+		utn.templates.put("setAdmin", "ALTER USER " + utn.user + " ADMIN [TRUE|FALSE]");
+		utn.templates.put("rename", "ALTER USER " + utn.user + " RENAME TO <NEW_NAME>");
+		utn.templates.put("setPassword", "ALTER USER " + utn.user + " SET PASSWORD '<NEW_PASS>'");
+		utn.templates.put("drop", "DROP USER " + utn.user);
+		utn.templates.put("createSchema", "CREATE SCHEMA IF NOT EXISTS <NAME> AUTHORIZATION <USER_NAME>");
+		
+		Table schemas = SESSION
+				.query("select schema_name, schema_owner from	information_schema.schemata " +
+					   "where schema_owner='" + utn.user + "'");
+		
+		for (Row _row : schemas)
+			utn.schemas.add(getSchemaNodeFromRown(_row));
+				
+		return utn;
+	}
+	
+	private SchemaTreeNode getSchemaNodeFromRown(Row row) throws SQLException {
+		SchemaTreeNode stn = new SchemaTreeNode();
+		
+		stn.schema = row.get(0);
+		stn.ddl = "CREATE SCHEMA IF NOT EXISTS " + stn.schema + " AUTHORIZATION " + row.get(1);
+		stn.query = "select * from information_schema.schemata where schema_name='" + stn.schema +"'";
+		
+		stn.templates.put("createConstant", "CREATE CONSTANT IF NOT EXISTS <NAME> VALUE <EXPRESSION>");
+		stn.templates.put("createConstraint", "ALTER TABLE IF EXISTS <TABLE_NAME> ADD CONSTRAINT "
+				+ "<CONSTRAINT_NAME> [CHECK <EXPRESSION>|UNIQUE(<COL_NAME>)|FOREIGN KEY"
+				+ "(<COL_NAME>) REFERENCES <TABLE_NAME>(<COL_NAME>)|PRIMARY KEY(<COL_NAME>)] [CHECK|NOCHECK]");
+		stn.templates.put("createFunction", "CREATE ALIAS <NAME> FOR \"<JAVA_CLASS_METHOD>\"");
+		stn.templates.put("createIndex", "CREATE INDEX <NAME> ON <TABLE_NAME>(<COL_NAME>)");
+		stn.templates.put("createSequence", "CREATE SEQUENCE <NAME> START WITH <LONG>"
+				+ "\n\tINCREMENT BY <LONG> MINVALUE <LONG> MAXVALUE <LONG>");
+		stn.templates.put("createTable", "CREATE TABLE <NAME>(<COL_NAME> <DATA_TYPE> <CONSTRAINTS>,...)");
+		stn.templates.put("createTrigger", "CREATE TRIGGER <NAME> [BEFORE|AFTER|INSTEAD OF] [INSERT|UPDATE|DELETE|SELECT|ROLLBACK]"
+					+ " ON <TABLE_NAME> FOR EACH ROW CALL \"<TRIGGER_CLASS_NAME>\"");
+		stn.templates.put("createView", "CREATE VIEW <VIEW_NAME> AS SELECT * FROM <TABLE_NAME> WHERE <COL_NAME> < 100");
+		stn.templates.put("rename", "ALTER SCHEMA " + stn.schema + " RENAME TO <NEW_NAME>");
+		stn.templates.put("drop", "DROP SCHEMA " + stn.schema);
+		
+		Table constants = SESSION
+				.query("select constant_name, sql, constant_schema from information_schema.constants " +
+					   "where constant_schema='" + stn.schema + "'");
+		
+		for (Row cRow : constants) {
+			DBObject obj = new DBObject();
+			obj.name = cRow.get(0);
+			obj.ddl = "CREATE CONSTANT IF NOT EXISTS " + cRow.get(2) + "."  + cRow.get(0) + " VALUE " + cRow.get(1);
+			obj.query = "select * from information_schema.constants where constant_name='".toUpperCase() + obj.name + "'";
+			obj.templates.put("drop", "DROP CONSTANT IF EXISTS " + cRow.get(2) + "." + obj.name);
+			stn.constants.add(obj);
+		}
+		
+		Table constraints = SESSION
+				.query("select constraint_name, sql, table_name, constraint_schema from information_schema.constraints " +
+					   "where constraint_schema='" + stn.schema + "'");
+		
+		for (Row cRow : constraints) {
+			DBObject obj = new DBObject();
+			obj.name = cRow.get(0);
+			obj.ddl = cRow.get(1);
+			obj.query = "select * from information_schema.constraints where constraint_name='".toUpperCase() + obj.name + "'";
+			obj.templates.put("rename", "ALTER TABLE " + cRow.get(3) + "." + cRow.get(2) + " RENAME CONSTRAINT " + obj.name + " TO <NEW_NAME>");
+			obj.templates.put("drop", "ALTER TABLE " + cRow.get(3) + "." + cRow.get(2) + " DROP CONSTRAINT " + obj.name);
+			stn.constraints.add(obj);
+		}
+		
+		Table functions = SESSION
+				.query("select alias_name, source, alias_schema from information_schema.function_aliases " +
+					   "where alias_schema='" + stn.schema + "'");
+		
+		for (Row cRow : functions) {
+			DBObject obj = new DBObject();
+			obj.name = cRow.get(0);
+			obj.ddl = "CREATE ALIAS " + cRow.get(2) + "." + obj.name + " AS $$ " + cRow.get(1) + "$$";
+			obj.query = "select * from information_schema.function_aliases where alias_name='".toUpperCase() + obj.name + "'";
+			obj.templates.put("drop", "DROP ALIAS " + cRow.get(2) + "." + obj.name);
+			stn.functions.add(obj);
+		}
+		
+		Table indexes = SESSION
+				.query("select index_name, sql, table_schema from information_schema.indexes " +
+					   "where table_schema='" + stn.schema + "'");
+		
+		for (Row cRow : indexes) {
+			DBObject obj = new DBObject();
+			obj.name = cRow.get(0);
+			obj.ddl = cRow.get(1);
+			obj.query = "select * from information_schema.indexes where index_name='".toUpperCase() + obj.name + "'";
+			obj.templates.put("rename", "ALTER INDEX " + cRow.get(2) + "." + obj.name +" RENAME TO <NEW_NAME>");
+			obj.templates.put("drop", "DROP INDEX IF EXISTS " + cRow.get(2) + "." + obj.name);
+			stn.indexes.add(obj);
+		}
+		
+		Table sequences = SESSION
+				.query("select sequence_name, increment, min_value, max_value, sequence_schema from information_schema.sequences " +
+					   "where sequence_schema='" + stn.schema + "'");
+		
+		for (Row cRow : sequences) {
+			DBObject obj = new DBObject();
+			obj.name = cRow.get(0);
+			obj.ddl = "CREATE SEQUENCE IF NOT EXISTS " + cRow.get(4) + "." + obj.name + " INCREMENT BY " + 
+					cRow.get(1) + " MINVALUE " + cRow.get(2) + " MAXVALUE " + cRow.get(3);
+			obj.query = "select * from information_schema.sequences where sequence_name='".toUpperCase() + obj.name + "'";
+			obj.templates.put("edit", "ALTER SEQUENCE " + cRow.get(4) + "." + obj.name + 
+					" RESTART WITH <LONG>\n\tINCREMENT BY <LONG> MINVALUE <LONG> MAXVALUE <LONG>");
+			obj.templates.put("drop", "DROP SEQUENCE IF EXISTS " + cRow.get(4) + "." + obj.name);
+			stn.sequences.add(obj);
+		}
+		
+		Table tables = SESSION
+				.query("select table_name, sql, table_schema from information_schema.tables " +
+					   "where table_schema='" + stn.schema + "'");
+		
+		for (Row cRow : tables) {
+			DBObject obj = new DBObject();
+			obj.name = cRow.get(0);
+			obj.ddl = cRow.get(1);
+			obj.query = "select * from ".toUpperCase() + cRow.get(2) + "." + obj.name;
+			obj.templates.put("addColumn", "ALTER TABLE " + cRow.get(2) + "." + obj.name + " ADD <COL_NAME> <DATA_TYPE>");
+			obj.templates.put("editColumn", "ALTER TABLE " + cRow.get(2) + "." + obj.name + " ALTER COLUMN <COL_NAME> <DATA_TYPE>");
+			obj.templates.put("dropColumn", "ALTER TABLE " + cRow.get(2) + "." + obj.name + " DROP <COL NAME1>,<COL_NAME2>,...");
+			obj.templates.put("addConstraint", "ALTER TABLE " + cRow.get(2) + "." + obj.name + " ADD CONSTRAINT [CHECK <EXPRESSION>|UNIQUE(<COL_NAME>)|FOREIGN KEY"
+				+ "(<COL_NAME>) REFERENCES <TABLE_NAME>(<COL_NAME>)|PRIMARY KEY(<COL_NAME>)] [CHECK|NOCHECK]");
+			obj.templates.put("renameConstraint", "ALTER TABLE " + cRow.get(2) + "." + obj.name + " RENAME CONSTRAINT <OLD_NAME> TO <NEW_NAME>");
+			obj.templates.put("dropConstraint", "ALTER TABLE " + cRow.get(2) + "." + obj.name + " DROP CONSTRAINT <CONSTRAINT_NAME>");
+			obj.templates.put("rename", "ALTER TABLE " + cRow.get(2) + "." + obj.name +" RENAME TO <NEW_NAME>");
+			obj.templates.put("drop", "DROP TABLE " + cRow.get(2) + "." + obj.name + " [RESTRICT|CASCADE]");
+			stn.tables.add(obj);
+		}
+		
+		Table triggers = SESSION
+				.query("select trigger_name, sql, trigger_schema from information_schema.triggers " +
+					   "where trigger_schema='" + stn.schema + "'");
+		
+		for (Row cRow : triggers) {
+			DBObject obj = new DBObject();
+			obj.name = cRow.get(0);
+			obj.ddl = cRow.get(1);
+			obj.query = "select * from information_schema.triggers where trigger_name='".toUpperCase() + obj.name + "'";
+			obj.templates.put("drop", "DROP TRIGGER IF EXISTS " + cRow.get(2) + "." + obj.name);
+			stn.triggers.add(obj);
+		}
+		
+		Table views = SESSION
+				.query("select table_name, view_definition, table_schema from information_schema.views " +
+					   "where table_schema='" + stn.schema + "'");
+		
+		for (Row cRow : views) {
+			DBObject obj = new DBObject();
+			obj.name = cRow.get(0);
+			obj.ddl = cRow.get(1);
+			obj.query = "select * from information_schema.views where table_name='".toUpperCase() + obj.name + "'";
+			obj.templates.put("edit", "ALTER VIEW IF EXISTS " + cRow.get(2) + "." + obj.name + " RECOMPILE");
+			obj.templates.put("drop", "DROP VIEW IF EXISTS " + cRow.get(2) + "." + obj.name + " [RESTRICT|CASCADE]");
+			stn.views.add(obj);
+		}
+		
+		return stn;
 	}
 	
 	private void closeSession() {
