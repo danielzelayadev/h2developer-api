@@ -44,6 +44,11 @@ public class H2Connection {
 		_conn = new h2.core.datastructs.Connection(url, username, password);
 	}
 	
+	public void connect() throws SQLException {
+		if (conn != null && conn.isClosed())
+			this.conn = DriverManager.getConnection(_conn.getUrl(), _conn.getUsername(), _conn.getPassword());
+	}
+	
 	public void disconnect() throws SQLException {
 		if (conn != null && !conn.isClosed())
 			conn.close();
