@@ -78,6 +78,10 @@ public class Table implements Iterable<Row> {
 		return rows.size();
 	}
 	
+	public ArrayList<Column> getColumns() {
+		return columns;
+	}
+	
 	public String get(String colName, int rowNo) {
 		return rows
 				.get(rowNo)
