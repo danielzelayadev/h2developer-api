@@ -1,16 +1,21 @@
 package com.wupa9.h2api.models;
 
-import java.util.ArrayList;
+import java.util.HashMap;
 
 public class Result {
 	
 	public String statement = "";
-	public ArrayList<ArrayList<Entry>> resultSet = new ArrayList<>();
+	public ResultSet resultSet = new ResultSet();
 	public ResultStatus status = ResultStatus.SUCCESS;
 	public String msg = "";
+	public int errorCode = -1;
 	
-	public void push(ArrayList<Entry> register) {
-		resultSet.add(register);
+	public void pushColumn(String col) {
+		resultSet.columns.add(col);
+	}
+	
+	public void push(HashMap<String, String> rowData) {
+		resultSet.data.add(rowData);
 	}
 
 }
