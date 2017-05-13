@@ -2,13 +2,10 @@ package h2.core;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Statement;
 
-import h2.core.datastructs.Cell;
-import h2.core.datastructs.Column;
-import h2.core.datastructs.Row;
+import h2.core.datastructs.StatementResult;
 import h2.core.datastructs.Table;
 
 public class H2Connection {
@@ -54,26 +51,22 @@ public class H2Connection {
 			conn.close();
 	}
 	
-	public void execute(String s) throws SQLException {
-		conn.createStatement().execute(s);
+	public StatementResult execute(String sql) throws SQLException {
+		StatementResult result = new StatementResult();
+		Statement stmt = conn.createStatement();
+		
+		if (stmt.execute(sql))
+			result.table = new Table(stmt.getResultSet());
+		else
+			result.updateCount = stmt.getUpdateCount();
+		
+		stmt.close();
+		
+		return result;
 	}
 	
 	public Table query(String q) throws SQLException {
-		Table table = new Table();
-		ResultSet rs = conn.createStatement().executeQuery(q);
-		ResultSetMetaData rsmd = rs.getMetaData();
-		
-		for (int i = 0; i < rsmd.getColumnCount(); i++)
-			table.addColumn(new Column(rsmd.getColumnName(i + 1)));
-			
-        while (rs.next()) {
-        	Row r = new Row();
-        	for (int i = 0; i < rsmd.getColumnCount(); i++)
-        		r.addCell(new Cell(rs.getString(i + 1)));
-        	table.insertRow(r);
-        }
-        
-		return table;
+		return new Table(conn.createStatement().executeQuery(q));
 	}
 	
 	@Override
