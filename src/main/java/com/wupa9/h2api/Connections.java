@@ -31,6 +31,7 @@ import com.wupa9.h2api.models.UserTreeNode;
 import h2.core.H2Connection;
 import h2.core.datastructs.Column;
 import h2.core.datastructs.Row;
+import h2.core.datastructs.StatementResult;
 import h2.core.datastructs.Table;
 
 /**
@@ -181,7 +182,7 @@ public class Connections {
 	@Path("run")
 	@Consumes(MediaType.TEXT_PLAIN)
 	@Produces(MediaType.APPLICATION_JSON)
-	public Response run(String statement) {
+	public Response run(String stmt) {
 		if (SESSION == null)
 			return Response.status(403)
 					.entity(new Error("You must connect to a db first.", ""))
@@ -194,44 +195,37 @@ public class Connections {
 		}
 		
 		Result res = new Result();
+		res.statement = stmt;
 		
-		String firstToken = statement.substring(0, statement.indexOf(" "));
-		
-		res.statement = statement;
-		
-		if (firstToken.equalsIgnoreCase("SELECT")) {
-			try {
-				Table t = SESSION.query(statement);
+		try {
+			StatementResult sres = SESSION.execute(stmt);
+			
+			res.status = ResultStatus.SUCCESS;
+			
+			if (sres.updateCount != -1)
+				res.updateCount = sres.updateCount;
+			else {
+				Table t = sres.table;
 				ArrayList<Column> cols = t.getColumns();
 				
 				for (Column c : cols)
 					res.pushColumn(c.getName());
 				
-				for (Row r : t) {
+				for (Row row : t) {
 					int i = 0;
 					HashMap<String, String> rowData = new HashMap<>();
 					
-					for (String val : r)
+					for (String val : row)
 						rowData.put(t.getColumn(i++).getName(), val);
 					
 					res.push(rowData);
 				}
-				
-				res.status = ResultStatus.SUCCESS;
-			} catch (SQLException e) {
-				res.status = ResultStatus.FAILED;
-				res.msg = e.getMessage();
-				res.errorCode = e.getErrorCode();
 			}
-		} else {
-			try {
-				SESSION.execute(statement);
-				res.status = ResultStatus.SUCCESS_AND_UPDATE;
-			} catch (SQLException e) {
-				res.status = ResultStatus.FAILED;
-				res.msg = e.getMessage();
-				res.errorCode = e.getErrorCode();
-			}
+			
+		} catch (SQLException e) {
+			res.errorCode = e.getErrorCode();
+			res.msg = e.getMessage();
+			res.status = ResultStatus.FAILED;
 		}
 		
 		try {
